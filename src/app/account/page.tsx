@@ -373,25 +373,39 @@ export default function AccountPage() {
           </div>
         </div>
 
+        {/* Activate code — prominent banner */}
+        <div
+          className="animate-up"
+          onClick={() => setShowActivate(true)}
+          style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(139,92,246,0.18) 100%)',
+            border: '1px solid rgba(99,102,241,0.35)',
+            borderRadius: 'var(--r-xl)',
+            padding: '18px 22px',
+            marginBottom: 20,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            transition: 'all var(--transition)',
+          }}
+        >
+          <div style={{ width: 48, height: 48, background: 'rgba(99,102,241,0.25)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>
+            🔑
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent-light)' }}>Nhập mã kích hoạt khóa học</p>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>Dán mã vào đây để mở khóa nội dung học tập</p>
+          </div>
+          <div style={{ background: 'var(--accent)', color: '#fff', borderRadius: 'var(--r-full)', padding: '8px 18px', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
+            Kích hoạt →
+          </div>
+        </div>
+
         {/* Actions */}
         <div className="glass animate-up" style={{ padding: 20, borderRadius: 'var(--r-xl)', marginBottom: 20 }}>
           <p className="section-title" style={{ marginBottom: 12 }}>Cài đặt tài khoản</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              className="nav-item"
-              style={{ justifyContent: 'space-between', borderRadius: 'var(--r-md)', padding: '12px 14px' }}
-              onClick={() => setShowActivate(true)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 18 }}>🔑</span>
-                <div>
-                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>Kích hoạt mã học</p>
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nhập mã để mở khóa khóa học</p>
-                </div>
-              </div>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>→</span>
-            </button>
-
             <button
               className="nav-item"
               style={{ justifyContent: 'space-between', borderRadius: 'var(--r-md)', padding: '12px 14px' }}

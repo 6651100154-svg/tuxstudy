@@ -1,8 +1,9 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { fetchSubjectsMeta, parseTsvBulk, parsePathSegments } from '@/lib/data'
+import { fetchSubjectsMeta, parseTsvBulk } from '@/lib/data'
 import { uid } from '@/lib/types'
-import type { Subject, Provider, Course, Module, Lesson, Asset } from '@/lib/types'
+import type { Subject, Course } from '@/lib/types'
+import { supabase } from '@/lib/supabase'
 
 // ── Drive ID extraction ───────────────────────────────────────────────────
 function extractDriveId(input: string): string {
@@ -10,11 +11,14 @@ function extractDriveId(input: string): string {
   return m ? m[1] : input.trim()
 }
 
-// ── API helpers ───────────────────────────────────────────────────────────
+// ── API helpers (with auth token) ─────────────────────────────────────────
 async function api(path: string, method: string, body?: any) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   })
   return res.json()
@@ -297,9 +301,38 @@ export default function AdminCoursesPage() {
       {/* Middle: Providers + Courses */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         {!selSubjectId ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, flexDirection: 'column', gap: 12, color: 'var(--text-muted)' }}>
-            <span style={{ fontSize: 48 }}>📚</span>
-            <p style={{ fontSize: 14 }}>Chọn môn học ở bên trái để quản lý nội dung</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 20 }}>
+            {/* Import TSV banner */}
+            <div
+              onClick={() => setShowBulkImport(true)}
+              style={{
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(234,179,8,0.15) 100%)',
+                border: '1px solid rgba(245,158,11,0.4)',
+                borderRadius: 'var(--r-xl)',
+                padding: '20px 28px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 18,
+                width: '100%',
+                maxWidth: 520,
+                transition: 'all var(--transition)',
+              }}
+            >
+              <div style={{ fontSize: 40, flexShrink: 0 }}>📥</div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--warning)' }}>Import hàng loạt từ TSV</p>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3 }}>Dán dữ liệu tab-separated để tạo Subject → Provider → Course → Lesson tự động</p>
+              </div>
+              <div style={{ background: 'rgba(245,158,11,0.85)', color: '#fff', borderRadius: 'var(--r-full)', padding: '8px 16px', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
+                Mở →
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-muted)', fontSize: 14 }}>
+              <span style={{ fontSize: 36 }}>📚</span>
+              <p>Chọn môn học ở bên trái để quản lý nội dung</p>
+            </div>
           </div>
         ) : selSubject && (
           <>
