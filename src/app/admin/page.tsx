@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { createServiceClient } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { formatStudyTime, formatDate, formatDateTime } from '@/lib/types'
 
 interface DashStats {
@@ -19,7 +19,10 @@ interface DashStats {
 }
 
 async function loadDashStats(): Promise<DashStats> {
-  const res = await fetch('/api/admin/dashboard')
+  const { data: { session } } = await supabase.auth.getSession()
+  const headers: Record<string, string> = {}
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`
+  const res = await fetch('/api/admin/dashboard', { headers })
   if (!res.ok) throw new Error('Failed')
   const d = await res.json()
   return d.data

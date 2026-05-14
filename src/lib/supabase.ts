@@ -122,7 +122,11 @@ export async function getActiveNotifications() {
     .from('notifications')
     .select('*')
     .eq('active', true)
-    .lte('start_date', today)
-    .gte('end_date', today)
-  return data || []
+    .order('created_at', { ascending: false })
+  // Filter dates client-side: empty string means "no limit"
+  return (data || []).filter((n: any) => {
+    if (n.start_date && n.start_date > today) return false
+    if (n.end_date && n.end_date < today) return false
+    return true
+  })
 }

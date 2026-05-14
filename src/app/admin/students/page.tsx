@@ -3,6 +3,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatDate, formatStudyTime, initials } from '@/lib/types'
 
+async function adminApi(path: string, method: string, body?: any) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  return res.json()
+}
+
 interface Student {
   id: string
   email: string
@@ -64,7 +72,7 @@ export default function AdminStudentsPage() {
 
   const toggleActive = async (student: Student) => {
     setSaving(true)
-    await supabase.from('accounts').update({ active: !student.active }).eq('id', student.id)
+    await adminApi('/api/accounts', 'PATCH', { id: student.id, active: !student.active })
     showToast(student.active ? '🔒 Đã khóa tài khoản' : '✅ Đã mở tài khoản')
     setSaving(false)
     setSelected(prev => prev?.id === student.id ? { ...prev, active: !prev.active } : prev)
@@ -74,7 +82,7 @@ export default function AdminStudentsPage() {
   const saveName = async () => {
     if (!selected || !editName.trim()) return
     setSaving(true)
-    await supabase.from('accounts').update({ name: editName.trim() }).eq('id', selected.id)
+    await adminApi('/api/accounts', 'PATCH', { id: selected.id, name: editName.trim() })
     showToast('✅ Đã cập nhật tên')
     setSaving(false)
     load()

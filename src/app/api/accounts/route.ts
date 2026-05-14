@@ -1,35 +1,12 @@
-import { createClient } from "@supabase/supabase-js"
 import { NextRequest } from "next/server"
-
-const supabaseServiceRole = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-async function requireAdmin(request: NextRequest): Promise<{ ok: boolean; status?: number; msg?: string }> {
-  const authHeader = request.headers.get("Authorization")
-  const token = authHeader?.replace("Bearer ", "").trim()
-  if (!token) return { ok: false, status: 401, msg: "Unauthorized" }
-
-  const { data: { user }, error } = await supabaseServiceRole.auth.getUser(token)
-  if (error || !user) return { ok: false, status: 401, msg: "Invalid session" }
-
-  const { data: account } = await supabaseServiceRole
-    .from("accounts")
-    .select("role")
-    .eq("auth_id", user.id)
-    .single()
-
-  if (account?.role !== "admin") return { ok: false, status: 403, msg: "Forbidden" }
-  return { ok: true }
-}
+import { requireAdminApiAuth, supabaseServiceRole as db } from "@/lib/server-auth"
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin(request)
+  const auth = await requireAdminApiAuth(request)
   if (!auth.ok) return Response.json({ error: auth.msg }, { status: auth.status })
 
   try {
-    const { data, error } = await supabaseServiceRole
+    const { data, error } = await db
       .from("accounts")
       .select("id, email, name, role, avatar, active, created_at, updated_at")
       .order("created_at", { ascending: false })
@@ -38,7 +15,7 @@ export async function GET(request: NextRequest) {
 
     const accounts = await Promise.all(
       (data || []).map(async (acc) => {
-        const { data: enrollments } = await supabaseServiceRole
+        const { data: enrollments } = await db
           .from("enrollments")
           .select("course_id")
           .eq("account_id", acc.id)
@@ -51,7 +28,32 @@ export async function GET(request: NextRequest) {
     )
 
     return Response.json({ accounts, count: accounts.length })
-  } catch (error) {
-    return Response.json({ error: String(error) }, { status: 500 })
+  } catch (err) {
+    return Response.json({ error: String(err) }, { status: 500 })
   }
+}
+
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAdminApiAuth(request)
+  if (!auth.ok) return Response.json({ error: auth.msg }, { status: auth.status })
+
+  const body = await request.json()
+  const { id, ...fields } = body
+  if (!id) return Response.json({ error: "Missing id" }, { status: 400 })
+
+  const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (fields.name !== undefined) update.name = fields.name
+  if (fields.active !== undefined) update.active = fields.active
+  if (fields.role !== undefined) update.role = fields.role
+  if (fields.avatar !== undefined) update.avatar = fields.avatar
+
+  const { data, error } = await db
+    .from("accounts")
+    .update(update)
+    .eq("id", id)
+    .select("id, email, name, role, avatar, active")
+    .single()
+
+  if (error) return Response.json({ error: error.message }, { status: 400 })
+  return Response.json({ ok: true, account: data })
 }
