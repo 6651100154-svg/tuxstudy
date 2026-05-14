@@ -153,7 +153,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       if (authErr || !auth.user) return { ok: false, msg: authErr?.message || 'Lỗi tạo tài khoản' }
 
-      const db = await createAccount(email.trim().toLowerCase(), name.trim(), auth.user.id, 'student')
+      // Try explicit insert; if DB trigger already created the row, fall back to fetch
+      let db = await createAccount(email.trim().toLowerCase(), name.trim(), auth.user.id, 'student')
+      if (!db) db = await getAccount(email.trim().toLowerCase())
       if (!db) return { ok: false, msg: 'Lỗi tạo hồ sơ. Vui lòng thử lại.' }
 
       const app = await dbToApp(db)

@@ -21,7 +21,7 @@ export default function NotificationPopup() {
     const next = [...dismissed, current.id]
     setDismissed(next)
     if (next.length >= notices.length) setVisible(false)
-    else setIdx(i => (i + 1) % (notices.length - next.length))
+    else setIdx(0)
   }
 
   if (!visible || !current) return null

@@ -9,6 +9,13 @@ import { formatStudyTime, formatDate, initials } from '@/lib/types'
 import TopBar from '@/components/TopBar'
 import NotificationPopup from '@/components/NotificationPopup'
 
+async function authFetch(url: string, body: any) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`
+  return fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+}
+
 // ── Activation Code Popup ─────────────────────────────────────────────────
 function ActivatePopup({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const { user } = useAuth()
@@ -32,11 +39,7 @@ function ActivatePopup({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     if (!cleaned) { setError('Vui lòng nhập mã kích hoạt'); return }
     setLoading(true); setError('')
     try {
-      const res = await fetch('/api/activation-codes/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: cleaned }),
-      })
+      const res = await authFetch('/api/activation-codes/validate', { code: cleaned })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Mã không hợp lệ'); setLoading(false); return }
       setCodeInfo(data.data)
@@ -63,14 +66,10 @@ function ActivatePopup({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     }
 
     try {
-      const res = await fetch('/api/activation-codes/redeem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: code.trim().toUpperCase(),
-          selectedCourseId: selectedCourseId || undefined,
-          selectedSubjectIds,
-        }),
+      const res = await authFetch('/api/activation-codes/redeem', {
+        code: code.trim().toUpperCase(),
+        selectedCourseId: selectedCourseId || undefined,
+        selectedSubjectIds,
       })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Lỗi kích hoạt'); setLoading(false); return }
