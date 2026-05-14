@@ -133,3 +133,41 @@ CREATE POLICY "Insert own enrollment" ON public.enrollments FOR INSERT WITH CHEC
 
 CREATE POLICY "Public read lesson progress" ON public.lesson_progress FOR SELECT USING (true);
 CREATE POLICY "Insert/Update own progress" ON public.lesson_progress FOR ALL USING (true);
+
+-- 4. BANG MA KICH HOAT KHOA HOC
+CREATE TABLE IF NOT EXISTS public.activation_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT UNIQUE NOT NULL,
+  template_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('single_course', 'single_subject', 'three_subjects', 'all_courses')),
+  variant TEXT NOT NULL DEFAULT 'general',
+  max_course_select INTEGER NOT NULL DEFAULT 0,
+  max_subject_select INTEGER NOT NULL DEFAULT 0,
+  grants_all_courses BOOLEAN NOT NULL DEFAULT FALSE,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  used_by UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
+  used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_by UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.activation_redemptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  activation_code_id UUID NOT NULL REFERENCES public.activation_codes(id) ON DELETE CASCADE,
+  account_id UUID NOT NULL REFERENCES public.accounts(id) ON DELETE CASCADE,
+  selected_course_id TEXT,
+  selected_subject_ids TEXT[] NOT NULL DEFAULT '{}',
+  granted_course_ids TEXT[] NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activation_codes_code ON public.activation_codes(code);
+CREATE INDEX IF NOT EXISTS idx_activation_codes_used_by ON public.activation_codes(used_by);
+CREATE INDEX IF NOT EXISTS idx_activation_redemptions_account ON public.activation_redemptions(account_id);
+CREATE INDEX IF NOT EXISTS idx_activation_redemptions_code ON public.activation_redemptions(activation_code_id);
+
+ALTER TABLE public.activation_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activation_redemptions ENABLE ROW LEVEL SECURITY;

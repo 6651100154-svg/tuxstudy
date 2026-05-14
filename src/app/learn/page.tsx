@@ -375,6 +375,9 @@ export default function LearnPage() {
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Chào mừng trở lại 👋</p>
               <h1 style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700 }}>{user.name}</h1>
             </div>
+            <div style={{ marginLeft: "auto" }}>
+              <button className="btn btn-ghost" onClick={() => router.push("/activate")}>🎟️ Nhập code</button>
+            </div>
           </div>
 
           {/* Continue learning */}

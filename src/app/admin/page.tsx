@@ -2,16 +2,51 @@
 import { useState, useEffect } from "react"
 import { useAuth } from "@/context/AuthContext"
 import { fetchSubjects, type Subject } from "@/lib/data"
+import { supabase } from "@/lib/supabase"
+
+type AdminAccount = {
+  id: string
+  email: string
+  name: string
+  role: "admin" | "student"
+  avatar?: string
+  active: boolean
+  createdAt: string
+  enrollments: string[]
+}
 
 export default function AdminDashboard() {
   const { user } = useAuth()
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [accounts, setAccounts] = useState<any[]>([])
+  const [accounts, setAccounts] = useState<AdminAccount[]>([])
+  const [accountsError, setAccountsError] = useState("")
 
   useEffect(() => { 
     fetchSubjects().then(setSubjects)
-    // Fetch accounts from API
-    fetch("/api/accounts").then(r => r.json()).then(d => setAccounts(d.accounts || []))
+
+    const fetchAccounts = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        setAccounts([])
+        setAccountsError("Chưa có phiên đăng nhập admin hợp lệ.")
+        return
+      }
+
+      const response = await fetch("/api/accounts", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        setAccounts([])
+        setAccountsError(payload?.error || "Không tải được danh sách tài khoản.")
+        return
+      }
+      setAccounts(payload.accounts || [])
+      setAccountsError("")
+    }
+
+    fetchAccounts()
   }, [])
 
   const students     = (accounts || []).filter(a => a.role === "student").map(a => ({ ...a, enrollments: a.enrollments || [] }))
@@ -73,6 +108,12 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {accountsError && (
+        <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: "var(--radius-md)", background: "var(--danger-dim)", color: "var(--danger)", fontSize: 13 }}>
+          {accountsError}
+        </div>
+      )}
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)" }}>

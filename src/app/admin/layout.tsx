@@ -8,6 +8,7 @@ const NAV = [
   { href: "/admin",               icon: "📊", label: "Thống kê" },
   { href: "/admin/courses",       icon: "📚", label: "Môn & Giáo viên" },
   { href: "/admin/students",      icon: "👥", label: "Học viên" },
+  { href: "/admin/codes",         icon: "🎟️", label: "Mã kích hoạt" },
   { href: "/admin/notifications", icon: "🔔", label: "Thông báo" },
 ]
 

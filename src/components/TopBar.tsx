@@ -62,9 +62,14 @@ export default function TopBar({ title }: { title?: string }) {
                   </button>
                 )}
                 {user.role === "student" && (
-                  <button className="nav-item" onClick={() => { setOpen(false); router.push("/learn") }}>
-                    <span>📚</span> Trang học
-                  </button>
+                  <>
+                    <button className="nav-item" onClick={() => { setOpen(false); router.push("/learn") }}>
+                      <span>📚</span> Trang học
+                    </button>
+                    <button className="nav-item" onClick={() => { setOpen(false); router.push("/activate") }}>
+                      <span>🎟️</span> Nhập mã kích hoạt
+                    </button>
+                  </>
                 )}
                 <hr className="divider" style={{ margin: "4px 0" }} />
                 <button className="nav-item" style={{ color: "var(--danger)" }} onClick={() => { logout(); router.push("/") }}>
