@@ -1,438 +1,481 @@
-"use client"
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/context/AuthContext"
-import { fetchSubjects, getSubjectByCourse, type Subject, type Course, type Lesson, type Part } from "@/lib/data"
-import { markLessonCompleted } from "@/lib/supabase"
-import TopBar from "@/components/TopBar"
-import NotificationPopup from "@/components/NotificationPopup"
+'use client'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
+import { fetchSubjectsMeta, getAllCourses, fetchCourse, findSubjectByCourse } from '@/lib/data'
+import { getLessonProgress, markLessonCompleted } from '@/lib/supabase'
+import type { Subject, Course, Module, Lesson, Asset } from '@/lib/types'
+import TopBar from '@/components/TopBar'
+import NotificationPopup from '@/components/NotificationPopup'
 
-// ── Video Player ───────────────────────────────────────────────────────────────
-function VideoPlayer({ videoId, backupId }: { videoId: string; backupId?: string }) {
+// ── Asset Player ──────────────────────────────────────────────────────────
+function AssetPlayer({ asset }: { asset: Asset }) {
   const [failed, setFailed] = useState(false)
-  const [usedBackup, setUsedBackup] = useState(false)
-  useEffect(() => { setFailed(false); setUsedBackup(false) }, [videoId])
+  useEffect(() => setFailed(false), [asset.id])
 
-  const src = !failed
-    ? `https://drive.google.com/file/d/${videoId}/preview`
-    : backupId && !usedBackup ? `https://drive.google.com/file/d/${backupId}/preview` : null
+  if (asset.type === 'video') {
+    const src = !failed ? `https://drive.google.com/file/d/${asset.driveId}/preview` : null
+    if (!src) return (
+      <div className="video-wrapper" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--bg-card)' }}>
+        <span style={{ fontSize: 40 }}>⚠️</span>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Không thể tải video. Vui lòng thử lại.</p>
+      </div>
+    )
+    return (
+      <div className="video-wrapper">
+        <iframe key={asset.id} src={src} allowFullScreen allow="autoplay" onError={() => setFailed(true)} />
+      </div>
+    )
+  }
 
-  if (!src) return (
-    <div style={{ aspectRatio: "16/9", background: "var(--bg-base)", borderRadius: "var(--radius-lg)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, border: "1px solid var(--border)" }}>
-      <span style={{ fontSize: 36 }}>⚠️</span>
-      <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Không thể tải video</p>
-    </div>
-  )
+  if (asset.type === 'pdf') {
+    const src = asset.url || (asset.driveId ? `https://drive.google.com/file/d/${asset.driveId}/preview` : '')
+    return (
+      <div style={{ width: '100%', height: 600, borderRadius: 'var(--r-lg)', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+        <iframe src={src} style={{ width: '100%', height: '100%', border: 'none' }} />
+      </div>
+    )
+  }
+
+  const href = asset.url || (asset.driveId ? `https://drive.google.com/file/d/${asset.driveId}/view` : '')
+  const icon = asset.type === 'ebook' ? '📘' : asset.type === 'sheet' ? '📊' : '📄'
   return (
-    <div style={{ position: "relative", aspectRatio: "16/9", background: "#000", borderRadius: "var(--radius-lg)", overflow: "hidden", boxShadow: "var(--shadow-md)" }}>
-      <iframe key={src} src={src} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }}
-        allowFullScreen allow="autoplay" onError={() => { if (!failed) setFailed(true); else if (backupId && !usedBackup) setUsedBackup(true) }} />
+    <div className="glass" style={{ padding: 24, borderRadius: 'var(--r-lg)', display: 'flex', alignItems: 'center', gap: 16 }}>
+      <span style={{ fontSize: 40 }}>{icon}</span>
+      <div>
+        <p style={{ fontWeight: 600, marginBottom: 8 }}>{asset.title}</p>
+        <a href={href} target="_blank" rel="noreferrer">
+          <button className="btn btn-primary" style={{ fontSize: 13 }}>Mở tài liệu ↗</button>
+        </a>
+      </div>
     </div>
   )
 }
 
-// ── Lesson sidebar item ────────────────────────────────────────────────────────
-function LessonItem({ lesson, isActive, isCompleted, isLocked, onClick }: {
-  lesson: Lesson; isActive: boolean; isCompleted: boolean; isLocked: boolean; onClick: () => void
+// ── Lesson sidebar item ───────────────────────────────────────────────────
+function LessonItem({ lesson, isActive, isDone, isLocked, onClick }: {
+  lesson: Lesson; isActive: boolean; isDone: boolean; isLocked: boolean; onClick: () => void
 }) {
   return (
-    <button onClick={isLocked ? undefined : onClick}
-      style={{ width: "100%", textAlign: "left", padding: "9px 12px", background: isActive ? "var(--accent-dim)" : "transparent", border: "none", borderRadius: "var(--radius-md)", cursor: isLocked ? "default" : "pointer", display: "flex", alignItems: "center", gap: 10, transition: "background var(--transition)", opacity: isLocked ? 0.4 : 1, marginBottom: 2 }}
-      onMouseEnter={e => { if (!isActive && !isLocked) (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)" }}
-      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent" }}
+    <button
+      onClick={isLocked ? undefined : onClick}
+      style={{
+        width: '100%', textAlign: 'left', padding: '8px 12px',
+        background: isActive ? 'var(--accent-dim)' : 'transparent',
+        border: isActive ? '1px solid rgba(99,102,241,0.2)' : '1px solid transparent',
+        borderRadius: 'var(--r-sm)', cursor: isLocked ? 'default' : 'pointer',
+        display: 'flex', alignItems: 'center', gap: 8,
+        transition: 'all var(--transition)', opacity: isLocked ? 0.4 : 1, marginBottom: 2,
+      }}
+      onMouseEnter={e => { if (!isActive && !isLocked) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)' }}
+      onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
     >
-      <span style={{ fontSize: 13, flexShrink: 0 }}>{isCompleted ? "✅" : isActive ? "🔵" : isLocked ? "🔒" : "⬜"}</span>
-      <span style={{ fontSize: 13, lineHeight: 1.4, color: isActive ? "var(--accent-light)" : "var(--text-primary)", flex: 1 }}>{lesson.title}</span>
-      {lesson.isPreview && !isLocked && <span style={{ fontSize: 10, padding: "2px 6px", background: "var(--success-dim)", color: "var(--success)", borderRadius: 99, flexShrink: 0 }}>Thử</span>}
+      <span style={{ fontSize: 11, flexShrink: 0 }}>{isDone ? '✅' : isActive ? '🔵' : isLocked ? '🔒' : '⬜'}</span>
+      <span style={{ fontSize: 13, lineHeight: 1.4, flex: 1, color: isActive ? 'var(--accent-light)' : 'var(--text-primary)' }}>
+        {lesson.title}
+      </span>
+      {lesson.isTrial && !isLocked && (
+        <span className="badge badge-success" style={{ fontSize: 10, padding: '1px 5px' }}>Thử</span>
+      )}
     </button>
   )
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
-export default function LearnPage() {
-  const router = useRouter()
-  const { user } = useAuth()
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [expandedSubjects, setExpandedSubjects] = useState<string[]>([])
-  const [expandedChapters, setExpandedChapters] = useState<string[]>([])
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
-  const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null)
-  const [selectedPart, setSelectedPart] = useState<Part | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [view, setView] = useState<"home" | "course" | "learn">("home")
-  const [search, setSearch] = useState("")
-  const [completed, setCompleted] = useState<string[]>([])
+// ── Course Template ───────────────────────────────────────────────────────
+function CourseTemplate({ course, subject, enrollments, onEnroll, onLearn, onBack }: {
+  course: Course; subject?: Subject; enrollments: string[]
+  onEnroll: () => void; onLearn: (lesson: Lesson) => void; onBack: () => void
+}) {
+  const isEnrolled = enrollments.includes(course.id)
+  const totalLessons = course.modules.reduce((s, m) => s + m.lessons.length, 0)
 
-  // 1. Fetch Subjects on mount
-  useEffect(() => {
-    fetchSubjects().then(s => setSubjects(s))
-    if (!user) { router.push("/"); return }
-    // Load completed lessons from localStorage (fallback; ideally fetch from DB later)
-    const prog = JSON.parse(localStorage.getItem(`edu_progress_${user.email}`) || "[]")
-    setCompleted(prog)
-  }, [user])
-
-  if (!user) return null
-
-  const progressKey = `edu_progress_${user.email}`
-  const enrolledCourses = subjects.flatMap(s => s.courses.filter(c => user.enrollments.includes(c.id)))
-
-  const markComplete = async (lessonId: string) => {
-    if (!completed.includes(lessonId)) {
-      // Save to Supabase
-      const success = await markLessonCompleted(user.id, lessonId)
-      if (success) {
-        const next = [...completed, lessonId]
-        setCompleted(next)
-        // Also save to localStorage as fallback
-        localStorage.setItem(progressKey, JSON.stringify(next))
-      }
-    }
-  }
-
-  const isLocked = (lesson: Lesson, course: Course) => !lesson.isPreview && !user.enrollments.includes(course.id)
-
-  const openLesson = (course: Course, lesson: Lesson) => {
-    setSelectedCourse(course)
-    setSelectedLesson(lesson)
-    setSelectedPart(lesson.parts[0] || null)
-    setExpandedChapters([lesson.chapterId])
-    setView("learn")
-  }
-
-  const openCourse = (course: Course) => {
-    setSelectedCourse(course)
-    if (course.chapters[0]) setExpandedChapters([course.chapters[0].id])
-    setView("course")
-  }
-
-  const getCourseProgress = (course: Course) => {
-    const all = course.chapters.flatMap(ch => ch.lessons)
-    const done = all.filter(l => completed.includes(l.id)).length
-    return { done, total: all.length, pct: all.length ? Math.round(done / all.length * 100) : 0 }
-  }
-
-  const continueLesson = (() => {
-    for (const c of enrolledCourses) {
-      for (const ch of c.chapters) {
-        for (const l of ch.lessons) { if (!completed.includes(l.id)) return { course: c, lesson: l } }
-      }
-    }
-    return null
-  })()
-
-  // ── LEARN VIEW ──────────────────────────────────────────────────────────────
-  if (view === "learn" && selectedCourse && selectedLesson && selectedPart) {
-    const allLessons = selectedCourse.chapters.flatMap(ch => ch.lessons)
-    const curIdx = allLessons.findIndex(l => l.id === selectedLesson.id)
-    const prog = getCourseProgress(selectedCourse)
-    const subj = getSubjectByCourse(subjects, selectedCourse.id)
-
-    return (
-      <div style={{ display: "flex", height: "100vh", flexDirection: "column" }}>
-        <NotificationPopup />
-        <TopBar title={selectedLesson.title} />
-        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-
-          {/* Lesson sidebar */}
-          <div className="sidebar-collapse" style={{ width: sidebarOpen ? 268 : 0, opacity: sidebarOpen ? 1 : 0, flexShrink: 0, background: "var(--bg-surface)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflowY: sidebarOpen ? "auto" : "hidden" }}>
-            <div style={{ padding: "12px 12px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-              <button className="btn btn-ghost" style={{ width: "100%", fontSize: 13, marginBottom: 10 }} onClick={() => setView("course")}>← Quay lại</button>
-              <p style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>{subj?.icon} {subj?.name}</p>
-              <p style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>{selectedCourse.teacherName}</p>
-              <div style={{ marginTop: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                  <span>{prog.done}/{prog.total} bài</span><span>{prog.pct}%</span>
-                </div>
-                <div className="progress-bar"><div className="progress-fill" style={{ width: `${prog.pct}%` }} /></div>
-              </div>
-            </div>
-
-            <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
-              {selectedCourse.chapters.map(ch => (
-                <div key={ch.id} style={{ marginBottom: 6 }}>
-                  <button onClick={() => setExpandedChapters(p => p.includes(ch.id) ? p.filter(x => x !== ch.id) : [...p, ch.id])}
-                    style={{ width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", justifyContent: "space-between", padding: "5px 4px", marginBottom: 3 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{ch.title}</span>
-                    <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{expandedChapters.includes(ch.id) ? "▾" : "▸"}</span>
-                  </button>
-                  {expandedChapters.includes(ch.id) && ch.lessons.map(l => (
-                    <LessonItem key={l.id} lesson={l} isActive={l.id === selectedLesson.id}
-                      isCompleted={completed.includes(l.id)} isLocked={isLocked(l, selectedCourse)}
-                      onClick={() => { setSelectedLesson(l); setSelectedPart(l.parts[0]) }} />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Main */}
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-            {/* Toolbar */}
-            <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, background: "var(--bg-surface)", flexShrink: 0 }}>
-              <button className="btn btn-ghost" style={{ padding: "6px 10px", fontSize: 13 }} onClick={() => setSidebarOpen(p => !p)}>☰</button>
-              <div style={{ flex: 1 }} />
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => { if (curIdx > 0) { const p = allLessons[curIdx - 1]; setSelectedLesson(p); setSelectedPart(p.parts[0]) } }} disabled={curIdx === 0}>← Trước</button>
-              <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={async () => { await markComplete(selectedLesson.id); if (curIdx < allLessons.length - 1) { const n = allLessons[curIdx + 1]; setSelectedLesson(n); setSelectedPart(n.parts[0]) } }}>
-                {curIdx < allLessons.length - 1 ? "Tiếp theo →" : "Hoàn thành ✓"}
-              </button>
-            </div>
-
-            <div style={{ padding: 24, flex: 1 }}>
-              {/* Multi-part selector */}
-              {selectedLesson.parts.length > 1 && (
-                <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                  {selectedLesson.parts.map(p => (
-                    <button key={p.id} onClick={() => setSelectedPart(p)}
-                      className={`btn ${p.id === selectedPart.id ? "btn-primary" : "btn-ghost"}`} style={{ fontSize: 13 }}>
-                      {p.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <VideoPlayer videoId={selectedPart.videoUrl} backupId={selectedPart.videoBackup} />
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-                <button className={`btn ${completed.includes(selectedLesson.id) ? "btn-success" : "btn-ghost"}`} style={{ fontSize: 13 }} onClick={() => markComplete(selectedLesson.id)}>
-                  {completed.includes(selectedLesson.id) ? "✅ Đã xem" : "☑ Đánh dấu đã xem"}
-                </button>
-              </div>
-
-              {selectedPart.pdfUrl && (
-                <div style={{ marginTop: 20, padding: 16, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
-                  <p className="section-title" style={{ marginBottom: 8 }}>Tài liệu</p>
-                  <a href={selectedPart.pdfUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--accent-light)", textDecoration: "none" }}>
-                    📄 Tải tài liệu bài học
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right: video list */}
-          {selectedLesson.parts.length > 1 && (
-            <div style={{ width: 220, flexShrink: 0, background: "var(--bg-surface)", borderLeft: "1px solid var(--border)", padding: 14, overflowY: "auto" }}>
-              <p className="section-title" style={{ marginBottom: 10 }}>Video trong bài</p>
-              {selectedLesson.parts.map(p => (
-                <button key={p.id} onClick={() => setSelectedPart(p)}
-                  style={{ width: "100%", textAlign: "left", padding: "8px 10px", background: p.id === selectedPart.id ? "var(--accent-dim)" : "transparent", border: "none", borderRadius: "var(--radius-md)", cursor: "pointer", marginBottom: 4, display: "flex", alignItems: "center", gap: 8, transition: "background var(--transition)" }}>
-                  <span style={{ fontSize: 12 }}>▶</span>
-                  <span style={{ fontSize: 13, color: p.id === selectedPart.id ? "var(--accent-light)" : "var(--text-secondary)" }}>{p.title}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // ── COURSE VIEW ─────────────────────────────────────────────────────────────
-  if (view === "course" && selectedCourse) {
-    const isEnrolled = user.enrollments.includes(selectedCourse.id)
-    const prog = getCourseProgress(selectedCourse)
-    const subj = getSubjectByCourse(subjects, selectedCourse.id)
-    const allLessons = selectedCourse.chapters.flatMap(ch => ch.lessons)
-
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-        <NotificationPopup />
-        <TopBar />
-        <div style={{ flex: 1, padding: "32px 24px", maxWidth: 800, margin: "0 auto", width: "100%" }}>
-          <button className="btn btn-ghost" style={{ marginBottom: 24 }} onClick={() => setView("home")}>← Trang chủ</button>
-
-          {/* Teacher card */}
-          <div className="card" style={{ padding: 24, marginBottom: 28, display: "flex", gap: 20 }}>
-            <div style={{ width: 72, height: 72, borderRadius: "var(--radius-lg)", background: "var(--accent-dim)", border: "2px solid var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>👤</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                <span className="badge badge-accent">{subj?.icon} {subj?.name}</span>
-                {isEnrolled && <span className="badge badge-success">✓ Đã đăng ký</span>}
-              </div>
-              <h1 style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{selectedCourse.teacherName}</h1>
-              <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>{selectedCourse.description}</p>
-              {isEnrolled && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 5 }}>
-                    <span>Tiến độ: {prog.done}/{prog.total} bài</span><span>{prog.pct}%</span>
-                  </div>
-                  <div className="progress-bar"><div className="progress-fill" style={{ width: `${prog.pct}%` }} /></div>
-                </div>
-              )}
-              <div style={{ marginTop: 18 }}>
-                {isEnrolled ? (
-                  <button className="btn btn-primary" style={{ padding: "10px 24px", fontSize: 15 }}
-                    onClick={() => { const l = selectedCourse.chapters[0]?.lessons[0]; if (l) openLesson(selectedCourse, l) }}>
-                    ▶ Học ngay
-                  </button>
-                ) : (
-                  <div style={{ padding: "10px 16px", background: "var(--bg-hover)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", fontSize: 14, color: "var(--text-secondary)", display: "inline-block" }}>
-                    🔒 Liên hệ admin để đăng ký khóa học
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Preview video */}
-          {selectedCourse.previewVideoId && (
-            <div style={{ marginBottom: 28 }}>
-              <p className="section-title" style={{ marginBottom: 10 }}>Video giới thiệu</p>
-              <VideoPlayer videoId={selectedCourse.previewVideoId} />
-            </div>
-          )}
-
-          {/* Lesson list */}
-          <div>
-            <p className="section-title" style={{ marginBottom: 14 }}>Nội dung khóa học ({allLessons.length} bài)</p>
-            {selectedCourse.chapters.map(ch => (
-              <div key={ch.id} style={{ marginBottom: 14 }}>
-                <div style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", marginBottom: 8 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600 }}>{ch.title}</p>
-                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{ch.lessons.length} bài học</p>
-                </div>
-                {ch.lessons.map(l => (
-                  <div key={l.id} onClick={() => !isLocked(l, selectedCourse) && openLesson(selectedCourse, l)}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: "var(--radius-md)", marginBottom: 4, background: "var(--bg-card)", border: "1px solid var(--border)", cursor: isLocked(l, selectedCourse) ? "default" : "pointer", transition: "all var(--transition)" }}
-                    onMouseEnter={e => { if (!isLocked(l, selectedCourse)) (e.currentTarget as HTMLElement).style.borderColor = "var(--border-md)" }}
-                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"}
-                  >
-                    <span>{completed.includes(l.id) ? "✅" : isLocked(l, selectedCourse) ? "🔒" : "▶"}</span>
-                    <span style={{ flex: 1, fontSize: 14, color: isLocked(l, selectedCourse) ? "var(--text-muted)" : "var(--text-primary)" }}>{l.title}</span>
-                    {l.isPreview && <span className="badge badge-success" style={{ fontSize: 10 }}>Xem thử</span>}
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{l.parts.length} video</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // ── HOME VIEW ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-      <NotificationPopup />
+    <div className="animate-up" style={{ maxWidth: 900, margin: '0 auto', padding: '24px 20px' }}>
+      <button className="btn btn-ghost" style={{ marginBottom: 20, fontSize: 13 }} onClick={onBack}>← Quay lại</button>
 
-      {/* Left sidebar */}
-      <div className="sidebar-collapse" style={{ width: sidebarOpen ? 256 : 0, opacity: sidebarOpen ? 1 : 0, flexShrink: 0, background: "var(--bg-surface)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", overflowY: sidebarOpen ? "auto" : "hidden" }}>
-        <div style={{ padding: "16px 14px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <div style={{ width: 28, height: 28, background: "var(--accent)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎓</div>
-            <span style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 700 }}>Tuxstudy</span>
+      <div className="glass" style={{ borderRadius: 'var(--r-2xl)', overflow: 'hidden', marginBottom: 20 }}>
+        {/* Cover */}
+        <div style={{
+          width: '100%', aspectRatio: '2.5/1', minHeight: 160,
+          background: course.coverImage ? `url(${course.coverImage}) center/cover` : `linear-gradient(135deg, ${subject?.color || '#6366f1'}44, rgba(139,92,246,0.3))`,
+          display: 'flex', alignItems: 'flex-end', padding: 24, position: 'relative',
+        }}>
+          {!course.coverImage && (
+            <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 72, opacity: 0.25 }}>
+              {subject?.icon || '📚'}
+            </span>
+          )}
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {subject && <span className="badge badge-neutral">{subject.icon} {subject.name}</span>}
+            {course.isTrialEnabled && <span className="badge badge-success">Có học thử</span>}
+            {isEnrolled && <span className="badge badge-accent">✓ Đã kích hoạt</span>}
           </div>
-          <input className="input" style={{ fontSize: 13 }} placeholder="🔍 Tìm giáo viên..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
-          {subjects.map(subj => {
-            const filtered = subj.courses.filter(c => !search || c.teacherName.toLowerCase().includes(search.toLowerCase()))
-            if (search && filtered.length === 0) return null
-            const isExp = expandedSubjects.includes(subj.id) || search.length > 0
-            const hasEnrolled = user.enrollments.some(eid => subj.courses.some(c => c.id === eid))
-            return (
-              <div key={subj.id} style={{ marginBottom: 3 }}>
-                <button onClick={() => setExpandedSubjects(p => isExp ? p.filter(x => x !== subj.id) : [...p, subj.id])}
-                  style={{ width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 8px", borderRadius: "var(--radius-md)", transition: "background var(--transition)" }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"}
-                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 15 }}>{subj.icon}</span>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{subj.name}</span>
-                    {hasEnrolled && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />}
-                  </div>
-                  <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{isExp ? "▾" : "▸"}</span>
-                </button>
+        <div style={{ padding: 28 }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 8 }}>
+            {course.name}
+          </h1>
+          {course.providerName && (
+            <p style={{ fontSize: 14, color: 'var(--accent-light)', marginBottom: 12, fontWeight: 500 }}>👨‍🏫 {course.providerName}</p>
+          )}
+          {course.tagline && <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginBottom: 12 }}>{course.tagline}</p>}
+          {course.description && <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{course.description}</p>}
 
-                {isExp && (
-                  <div style={{ paddingLeft: 12 }} className="animate-in">
-                    {filtered.map(c => (
-                      <button key={c.id} onClick={() => openCourse(c)}
-                        style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "7px 10px", borderRadius: "var(--radius-md)", fontSize: 13, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 8, marginBottom: 2, transition: "all var(--transition)" }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"; (e.currentTarget as HTMLElement).style.color = "var(--text-primary)" }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)" }}>
-                        <span style={{ fontSize: 11 }}>{user.enrollments.includes(c.id) ? "✅" : "—"}</span>
-                        {c.teacherName}
-                      </button>
-                    ))}
+          <div style={{ display: 'flex', gap: 24, marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+            <div>
+              <p style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)' }}>{course.modules.length}</p>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Chuyên đề</p>
+            </div>
+            <div style={{ width: 1, background: 'var(--border)' }} />
+            <div>
+              <p style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)' }}>{totalLessons}</p>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Bài học</p>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            {isEnrolled ? (
+              <button className="btn btn-primary" style={{ fontSize: 15, padding: '12px 28px', fontWeight: 600 }}
+                onClick={() => { const l = course.modules[0]?.lessons[0]; if (l) onLearn(l) }}>
+                ▶ Học ngay
+              </button>
+            ) : (
+              <button className="btn btn-ghost" style={{ fontSize: 15, padding: '12px 28px', fontWeight: 600 }} onClick={onEnroll}>
+                🔑 Kích hoạt ngay
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="glass" style={{ padding: 24, borderRadius: 'var(--r-xl)' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Nội dung khóa học</h2>
+        {course.modules.map(mod => (
+          <div key={mod.id} style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+              {mod.title}
+            </p>
+            {mod.lessons.map((lesson, li) => {
+              const isTrialLesson = lesson.isTrial && course.isTrialEnabled
+              const isLocked = !isEnrolled && !isTrialLesson
+              return (
+                <div key={lesson.id} className="timeline-item" style={{ position: 'relative' }}>
+                  {li < mod.lessons.length - 1 && <div className="timeline-line" />}
+                  <div className={`timeline-dot ${isTrialLesson ? 'trial' : isDone(lesson.id) ? 'done' : ''}`}
+                    style={{ cursor: isLocked ? 'default' : 'pointer' }}
+                    onClick={() => !isLocked && onLearn(lesson)}
+                  >
+                    {isLocked ? '🔒' : (li + 1)}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                  <div style={{ flex: 1, paddingTop: 3 }}>
+                    <p style={{ fontSize: 14, fontWeight: 500, color: isLocked ? 'var(--text-muted)' : 'var(--text-primary)', marginBottom: 3 }}>
+                      {lesson.title}
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {isTrialLesson && <span className="badge badge-success" style={{ fontSize: 10 }}>Học thử</span>}
+                      {lesson.assets.length > 0 && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {lesson.assets.filter(a => a.type === 'video').length > 0 && '🎬 '}
+                          {lesson.assets.filter(a => a.type === 'pdf').length > 0 && '📄 '}
+                          {lesson.assets.length} tài nguyên
+                        </span>
+                      )}
+                      {!isLocked && (
+                        <button className="btn btn-ghost" style={{ padding: '3px 10px', fontSize: 11 }} onClick={() => onLearn(lesson)}>
+                          {isEnrolled ? 'Xem →' : 'Học thử →'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  function isDone(lessonId: string) { return false } // will use completedIds from parent
+}
+
+// ── Learn View ────────────────────────────────────────────────────────────
+function LearnView({ course, subject, lesson: initLesson, completedIds, onComplete, onBack }: {
+  course: Course; subject?: Subject; lesson: Lesson; completedIds: string[]
+  onComplete: (id: string) => void; onBack: () => void
+}) {
+  const [curLesson, setCurLesson] = useState(initLesson)
+  const [curAsset, setCurAsset]   = useState(initLesson.assets[0] || null)
+  const [expanded, setExpanded]   = useState([course.modules[0]?.id || ''])
+  const [sidebar, setSidebar]     = useState(true)
+
+  const allLessons = course.modules.flatMap(m => m.lessons)
+  const idx = allLessons.findIndex(l => l.id === curLesson.id)
+  const total = allLessons.length
+  const done = completedIds.length
+  const pct = total ? Math.round(done / total * 100) : 0
+
+  const goTo = (l: Lesson) => {
+    setCurLesson(l)
+    setCurAsset(l.assets[0] || null)
+    setExpanded(p => p.includes(l.moduleId) ? p : [...p, l.moduleId])
+  }
+
+  return (
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+      {/* Sidebar */}
+      <div className="sidebar sidebar-collapse scroll-thin" style={{ width: sidebar ? 268 : 0, opacity: sidebar ? 1 : 0, overflow: sidebar ? 'hidden auto' : 'hidden', flexShrink: 0 }}>
+        <div style={{ padding: '12px 12px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <button className="btn btn-ghost" style={{ width: '100%', fontSize: 12, marginBottom: 10, justifyContent: 'flex-start' }} onClick={onBack}>← Quay lại</button>
+          <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{subject?.icon} {subject?.name}</p>
+          <p style={{ fontSize: 13, fontWeight: 600, marginTop: 2, lineHeight: 1.3 }}>{course.name}</p>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+              <span>{done}/{total}</span><span>{pct}%</span>
+            </div>
+            <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+          {course.modules.map(mod => (
+            <div key={mod.id} style={{ marginBottom: 4 }}>
+              <button
+                onClick={() => setExpanded(p => p.includes(mod.id) ? p.filter(x => x !== mod.id) : [...p, mod.id])}
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', padding: '5px 6px', marginBottom: 2 }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>{mod.title}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{expanded.includes(mod.id) ? '▾' : '▸'}</span>
+              </button>
+              {expanded.includes(mod.id) && mod.lessons.map(l => (
+                <LessonItem key={l.id} lesson={l} isActive={l.id === curLesson.id}
+                  isDone={completedIds.includes(l.id)} isLocked={false} onClick={() => goTo(l)} />
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Main */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <TopBar />
-        <div style={{ flex: 1, overflowY: "auto", padding: 28 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
-            <button className="btn btn-ghost" style={{ padding: "7px 10px" }} onClick={() => setSidebarOpen(p => !p)}>☰</button>
-            <div>
-              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Chào mừng trở lại 👋</p>
-              <h1 style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700 }}>{user.name}</h1>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-surface)', backdropFilter: 'blur(12px)', flexShrink: 0 }}>
+          <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setSidebar(p => !p)}>☰</button>
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{curLesson.title}</span>
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => { if (idx > 0) goTo(allLessons[idx - 1]) }} disabled={idx === 0}>← Trước</button>
+          <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { onComplete(curLesson.id); if (idx < total - 1) goTo(allLessons[idx + 1]) }}>
+            {idx < total - 1 ? 'Tiếp →' : '✓ Hoàn thành'}
+          </button>
+        </div>
+
+        <div style={{ padding: 24, flex: 1 }}>
+          {curLesson.assets.length > 1 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              {curLesson.assets.map(a => (
+                <button key={a.id} className={`btn ${a.id === curAsset?.id ? 'btn-primary' : 'btn-ghost'}`} style={{ fontSize: 12 }} onClick={() => setCurAsset(a)}>
+                  {a.type === 'video' ? '🎬' : a.type === 'pdf' ? '📄' : '📊'} {a.title}
+                </button>
+              ))}
             </div>
-            <div style={{ marginLeft: "auto" }}>
-              <button className="btn btn-ghost" onClick={() => router.push("/activate")}>🎟️ Nhập code</button>
+          )}
+          {curAsset && <AssetPlayer asset={curAsset} />}
+          <div style={{ marginTop: 14 }}>
+            <button className={`btn ${completedIds.includes(curLesson.id) ? 'btn-success' : 'btn-ghost'}`} style={{ fontSize: 13 }} onClick={() => onComplete(curLesson.id)}>
+              {completedIds.includes(curLesson.id) ? '✅ Đã hoàn thành' : '☑ Đánh dấu hoàn thành'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────
+export default function LearnPage() {
+  const router = useRouter()
+  const { user } = useAuth()
+  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [search, setSearch] = useState('')
+  const [completedIds, setCompleted] = useState<string[]>([])
+  const [view, setView] = useState<'home' | 'template' | 'learn'>('home')
+  const [selCourse, setSelCourse] = useState<Course | null>(null)
+  const [selSubject, setSelSubject] = useState<Subject | undefined>()
+  const [selLesson, setSelLesson] = useState<Lesson | null>(null)
+  const [loadingCourse, setLoadingCourse] = useState(false)
+
+  useEffect(() => {
+    if (!user) { router.push('/'); return }
+    fetchSubjectsMeta().then(setSubjects)
+    getLessonProgress(user.id).then(setCompleted)
+  }, [user])
+
+  if (!user) return null
+
+  const enrolledIds = user.enrollments
+
+  const openTemplate = async (courseId: string, subject?: Subject) => {
+    setLoadingCourse(true)
+    setView('template')
+    const full = await fetchCourse(courseId)
+    if (full) { setSelCourse(full); setSelSubject(subject) }
+    setLoadingCourse(false)
+  }
+
+  const openLearn = (lesson: Lesson) => { setSelLesson(lesson); setView('learn') }
+
+  const markDone = async (lessonId: string) => {
+    if (completedIds.includes(lessonId)) return
+    const ok = await markLessonCompleted(user.id, lessonId)
+    if (ok) setCompleted(p => [...p, lessonId])
+  }
+
+  const enrolledCourses = subjects.flatMap(s =>
+    s.providers.flatMap(p =>
+      p.courses.filter(c => enrolledIds.includes(c.id)).map(c => ({ ...c, subject: s, providerName: p.name }))
+    )
+  )
+
+  const filtered = search
+    ? subjects.map(s => ({
+        ...s,
+        providers: s.providers.map(p => ({
+          ...p,
+          courses: p.courses.filter(c =>
+            c.name.toLowerCase().includes(search.toLowerCase()) ||
+            p.name.toLowerCase().includes(search.toLowerCase()) ||
+            s.name.toLowerCase().includes(search.toLowerCase())
+          ),
+        })).filter(p => p.courses.length > 0),
+      })).filter(s => s.providers.length > 0)
+    : subjects
+
+  // ── Learn View ────────────────────────────────────────────────────────────
+  if (view === 'learn' && selCourse && selLesson) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <NotificationPopup />
+        <TopBar title={selCourse.name} />
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <LearnView course={selCourse} subject={selSubject} lesson={selLesson}
+            completedIds={completedIds} onComplete={markDone} onBack={() => setView('template')} />
+        </div>
+      </div>
+    )
+  }
+
+  // ── Template View ─────────────────────────────────────────────────────────
+  if (view === 'template' && selCourse) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <NotificationPopup />
+        <TopBar />
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loadingCourse ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300 }}>
+              <div className="loading-ring" />
+            </div>
+          ) : (
+            <CourseTemplate
+              course={selCourse} subject={selSubject} enrollments={enrolledIds}
+              onEnroll={() => router.push('/account')}
+              onLearn={openLearn} onBack={() => setView('home')}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Home View ─────────────────────────────────────────────────────────────
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <NotificationPopup />
+      <TopBar
+        rightSlot={
+          <div className="search-box" style={{ width: 220 }}>
+            <span className="search-icon">🔍</span>
+            <input className="input" placeholder="Tìm khóa học..." value={search} onChange={e => setSearch(e.target.value)} style={{ borderRadius: 'var(--r-full)', fontSize: 13 }} />
+          </div>
+        }
+      />
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px' }}>
+
+        {/* Continue */}
+        {enrolledCourses.length > 0 && !search && (
+          <div style={{ marginBottom: 36 }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, marginBottom: 16, letterSpacing: '-0.02em' }}>Tiếp tục học</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
+              {enrolledCourses.slice(0, 4).map(({ subject, ...course }) => {
+                const allL = course.modules.reduce((acc: Lesson[], m: Module) => [...acc, ...m.lessons], [])
+                const doneL = completedIds.filter(id => allL.some(l => l.id === id)).length
+                const pct = allL.length ? Math.round(doneL / allL.length * 100) : 0
+                return (
+                  <div key={course.id} className="course-card" onClick={() => openTemplate(course.id, subject)}>
+                    <div className="course-card-cover" style={{ background: `${subject?.color || '#6366f1'}22` }}>
+                      <span style={{ zIndex: 2, fontSize: 40 }}>{subject?.icon || '📚'}</span>
+                    </div>
+                    <div style={{ padding: '14px 16px', position: 'relative', zIndex: 2 }}>
+                      <p style={{ fontSize: 13, color: 'var(--accent-light)', fontWeight: 500, marginBottom: 4 }}>{course.providerName}</p>
+                      <p style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3, marginBottom: 10, letterSpacing: '-0.01em' }}>{course.name}</p>
+                      <div className="progress-bar" style={{ marginBottom: 6 }}><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{doneL}/{allL.length} bài · {pct}%</p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
+        )}
 
-          {/* Continue learning */}
-          {continueLesson && (
-            <div style={{ marginBottom: 28, padding: 20, background: "var(--accent-dim)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "var(--radius-lg)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-              <div>
-                <p className="section-title" style={{ color: "var(--accent-light)", marginBottom: 4 }}>Tiếp tục học</p>
-                <p style={{ fontSize: 15, fontWeight: 600 }}>{continueLesson.course.teacherName}</p>
-                <p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>{continueLesson.lesson.title}</p>
-              </div>
-              <button className="btn btn-primary" onClick={() => openLesson(continueLesson.course, continueLesson.lesson)}>▶ Tiếp tục</button>
+        {/* All subjects */}
+        {filtered.map(subject => (
+          <div key={subject.id} style={{ marginBottom: 36 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <span style={{ fontSize: 24 }}>{subject.icon}</span>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em' }}>{subject.name}</h2>
+              <span className="badge badge-neutral">{subject.providers.reduce((s, p) => s + p.courses.length, 0)} khóa</span>
             </div>
-          )}
-
-          {/* Enrolled courses */}
-          {enrolledCourses.length > 0 && (
-            <div style={{ marginBottom: 32 }}>
-              <p className="section-title" style={{ marginBottom: 14 }}>Khóa học của tôi ({enrolledCourses.length})</p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
-                {enrolledCourses.map(c => {
-                  const s = getSubjectByCourse(subjects, c.id)
-                  const p = getCourseProgress(c)
-                  return (
-                    <div key={c.id} className="card card-hover" style={{ padding: 18 }} onClick={() => openCourse(c)}>
-                      <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "center" }}>
-                        <div style={{ width: 42, height: 42, background: "var(--bg-active)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{s?.icon}</div>
-                        <div>
-                          <p style={{ fontSize: 11, color: "var(--text-muted)" }}>{s?.name}</p>
-                          <p style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>{c.teacherName}</p>
+            {subject.providers.map(provider => (
+              <div key={provider.id} style={{ marginBottom: 20 }}>
+                {subject.providers.length > 1 && (
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, paddingLeft: 4 }}>{provider.name}</p>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14 }}>
+                  {provider.courses.map(course => {
+                    const isEnrolled = enrolledIds.includes(course.id)
+                    return (
+                      <div key={course.id} className="course-card" onClick={() => openTemplate(course.id, subject)}>
+                        <div className="course-card-cover" style={{ background: `${subject.color}22`, minHeight: 120 }}>
+                          <span style={{ zIndex: 2, fontSize: 36 }}>{subject.icon}</span>
+                        </div>
+                        <div style={{ padding: '12px 14px', position: 'relative', zIndex: 2 }}>
+                          <p style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.3, marginBottom: 6, letterSpacing: '-0.01em' }}>{course.name}</p>
+                          {course.tagline && <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{course.tagline}</p>}
+                          <div>
+                            {isEnrolled
+                              ? <span className="badge badge-success" style={{ fontSize: 10 }}>✓ Đã kích hoạt</span>
+                              : course.isTrialEnabled
+                                ? <span className="badge badge-info" style={{ fontSize: 10 }}>Có học thử</span>
+                                : <span className="badge badge-neutral" style={{ fontSize: 10 }}>Chưa kích hoạt</span>
+                            }
+                          </div>
                         </div>
                       </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 5 }}>
-                        <span>{p.done}/{p.total} bài</span><span>{p.pct}%</span>
-                      </div>
-                      <div className="progress-bar"><div className="progress-fill" style={{ width: `${p.pct}%` }} /></div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* All subjects */}
-          <p className="section-title" style={{ marginBottom: 14 }}>Tất cả môn học</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
-            {subjects.map(s => (
-              <div key={s.id} className="card card-hover" style={{ padding: 16 }}
-                onClick={() => setExpandedSubjects(p => p.includes(s.id) ? p : [...p, s.id])}>
-                <span style={{ fontSize: 28, display: "block", marginBottom: 8 }}>{s.icon}</span>
-                <p style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{s.courses.length} giáo viên</p>
+                    )
+                  })}
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        ))}
+
+        {filtered.length === 0 && search && (
+          <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 48 }}>🔍</span>
+            <p style={{ marginTop: 12 }}>Không tìm thấy kết quả cho &ldquo;{search}&rdquo;</p>
+          </div>
+        )}
       </div>
     </div>
   )

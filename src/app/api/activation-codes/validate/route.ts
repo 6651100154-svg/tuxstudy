@@ -1,47 +1,33 @@
-import { NextRequest } from "next/server"
-import { normalizeActivationCode } from "@/lib/activation-codes"
-import { requireApiAuth, supabaseServiceRole } from "@/lib/server-auth"
-
-function isExpired(expiresAt: string | null): boolean {
-  if (!expiresAt) return false
-  return new Date(expiresAt).getTime() < Date.now()
-}
+import { NextRequest } from 'next/server'
+import { requireApiAuth, supabaseServiceRole as db } from '@/lib/server-auth'
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request)
-  if (!auth.ok) return Response.json({ error: auth.msg }, { status: auth.status })
+  if (!auth.ok) return Response.json({ ok: false, error: auth.msg }, { status: auth.status })
 
   const body = await request.json()
-  const code = normalizeActivationCode(String(body.code || ""))
-  if (!code) return Response.json({ error: "Code is required" }, { status: 400 })
+  const code = String(body.code || '').trim().toUpperCase()
+  if (!code) return Response.json({ ok: false, error: 'Vui lòng nhập mã kích hoạt' }, { status: 400 })
 
-  const { data: row, error } = await supabaseServiceRole
-    .from("activation_codes")
-    .select("*")
-    .eq("code", code)
+  const { data: row, error } = await db
+    .from('activation_codes')
+    .select('*')
+    .eq('code', code)
     .single()
 
-  if (error || !row) {
-    return Response.json({ ok: false, error: "Code does not exist" }, { status: 404 })
-  }
-
-  if (!row.is_active) {
-    return Response.json({ ok: false, error: "Code is disabled" }, { status: 400 })
-  }
-  if (row.used_by) {
-    return Response.json({ ok: false, error: "Code has already been used" }, { status: 400 })
-  }
-  if (isExpired(row.expires_at)) {
-    return Response.json({ ok: false, error: "Code is expired" }, { status: 400 })
+  if (error || !row) return Response.json({ ok: false, error: 'Mã không tồn tại trong hệ thống' }, { status: 404 })
+  if (!row.is_active) return Response.json({ ok: false, error: 'Mã đã bị vô hiệu hóa' }, { status: 400 })
+  if (row.used_by) return Response.json({ ok: false, error: 'Mã đã được sử dụng bởi tài khoản khác' }, { status: 400 })
+  if (row.expires_at && new Date(row.expires_at) < new Date()) {
+    return Response.json({ ok: false, error: 'Mã đã hết hạn sử dụng' }, { status: 400 })
   }
 
   return Response.json({
     ok: true,
-    code: {
+    data: {
       id: row.id,
       code: row.code,
       label: row.label,
-      templateKey: row.template_key,
       scope: row.scope,
       variant: row.variant,
       maxCourseSelect: row.max_course_select,
@@ -51,4 +37,3 @@ export async function POST(request: NextRequest) {
     },
   })
 }
-

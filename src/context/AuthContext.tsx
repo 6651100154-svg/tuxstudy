@@ -1,201 +1,199 @@
-"use client"
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react"
-import { supabase, getAccount, createAccount, getEnrollments, type DbAccount } from "@/lib/supabase"
+'use client'
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import { supabase, getAccount, createAccount, getEnrollments, type DbAccount } from '@/lib/supabase'
+import type { Account, Role } from '@/lib/types'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-export type Role = "admin" | "student"
+// ── Validation ────────────────────────────────────────────────────────────
+// Email: chuẩn định dạng, trim, lowercase, kiểm tra đuôi domain
+const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
+// Password: bỏ khoảng trắng đầu/cuối, chỉ cho a-z A-Z 0-9 và ký tự đặc biệt phổ biến
+const PASS_CHARS_RE = /^[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]+$/
 
-export interface Account {
-  id: string
-  email: string
-  name: string
-  role: Role
-  avatar: string
-  enrollments: string[]
-  createdAt: string
-  active: boolean
+export function validateEmail(raw: string): string | null {
+  const email = raw.trim().toLowerCase()
+  if (!email) return 'Vui lòng nhập email'
+  if (!EMAIL_RE.test(email)) return 'Địa chỉ email không hợp lệ (VD: ten@gmail.com)'
+  const domain = email.split('@')[1] || ''
+  if (!domain.includes('.')) return 'Email phải có đuôi hợp lệ (VD: .com, .vn)'
+  return null
 }
 
-// ── Convert DB to App format ──────────────────────────────────────────────────
-async function dbAccountToApp(dbAcc: DbAccount): Promise<Account> {
-  const enrollments = await getEnrollments(dbAcc.id)
+export function validatePassword(pw: string, minLen = 6): string | null {
+  if (!pw || !pw.trim()) return 'Vui lòng nhập mật khẩu'
+  const cleaned = pw.trim()
+  if (cleaned.length < minLen) return `Mật khẩu tối thiểu ${minLen} ký tự`
+  if (!PASS_CHARS_RE.test(cleaned)) return 'Mật khẩu chỉ gồm chữ, số và ký tự đặc biệt thông dụng'
+  return null
+}
+
+// ── Account mapping ───────────────────────────────────────────────────────
+async function dbToApp(db: DbAccount): Promise<Account> {
+  const enrollments = await getEnrollments(db.id)
   return {
-    id: dbAcc.id,
-    email: dbAcc.email,
-    name: dbAcc.name,
-    role: dbAcc.role,
-    avatar: dbAcc.avatar,
+    id: db.id,
+    email: db.email,
+    name: db.name,
+    role: db.role,
+    avatar: db.avatar,
+    active: db.active,
+    createdAt: db.created_at,
     enrollments,
-    createdAt: dbAcc.created_at,
-    active: dbAcc.active,
   }
 }
 
-// ── Context types ─────────────────────────────────────────────────────────────
+// ── Context types ─────────────────────────────────────────────────────────
 interface AuthCtx {
   user: Account | null
-  accounts: Account[]
-  theme: "dark" | "light"
-  login: (email: string, password: string) => Promise<{ ok: boolean; msg: string; role?: string }>
+  theme: 'dark' | 'light'
+  login:    (email: string, password: string) => Promise<{ ok: boolean; msg: string; role?: string }>
   register: (email: string, name: string, password: string) => Promise<{ ok: boolean; msg: string }>
-  logout: () => void
+  logout:   () => Promise<void>
   toggleTheme: () => void
   updateProfile: (data: Partial<Account>) => void
-  addAccount: (acc: Account) => Promise<void>
-  updateAccount: (email: string, data: Partial<Account>) => Promise<void>
-  deleteAccount: (email: string) => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
-export const useAuth = () => { const c = useContext(Ctx); if (!c) throw new Error("useAuth outside provider"); return c }
+export const useAuth = () => {
+  const c = useContext(Ctx)
+  if (!c) throw new Error('useAuth must be inside AuthProvider')
+  return c
+}
 
-// ── Provider ──────────────────────────────────────────────────────────────────
+// ── Provider ──────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<Account | null>(null)
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [theme, setTheme] = useState<"dark" | "light">("dark")
+  const [user,  setUser]  = useState<Account | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [ready, setReady] = useState(false)
 
-  // Fetch all accounts from Supabase
-  const fetchAccounts = useCallback(async () => {
-    try {
-      const { data, error } = await supabase.from("accounts").select("*")
-      if (error) return
-      const appAccounts = await Promise.all((data || []).map(dbAccountToApp))
-      setAccounts(appAccounts)
-    } catch (e) {
-      console.error("fetchAccounts error:", e)
+  const refreshUser = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user?.email) { setUser(null); return }
+    const db = await getAccount(session.user.email)
+    if (db && db.active) {
+      const app = await dbToApp(db)
+      setUser(app)
+      localStorage.setItem('edu_user', JSON.stringify(app))
+    } else {
+      setUser(null)
+      localStorage.removeItem('edu_user')
     }
   }, [])
 
-  // Init theme from localStorage and fetch accounts
+  // Restore session on mount
   useEffect(() => {
-    const savedTheme = (localStorage.getItem("edu_theme") || "dark") as "dark" | "light"
-    setTheme(savedTheme)
-    document.documentElement.setAttribute("data-theme", savedTheme)
-    fetchAccounts()
-    setReady(true)
+    const saved = (localStorage.getItem('edu_theme') || 'dark') as 'dark' | 'light'
+    setTheme(saved)
+    document.documentElement.setAttribute('data-theme', saved)
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        setUser(null)
+        localStorage.removeItem('edu_user')
+        setReady(true)
+        return
+      }
+      if (session.user.email) {
+        const db = await getAccount(session.user.email)
+        if (db && db.active) {
+          const app = await dbToApp(db)
+          setUser(app)
+          localStorage.setItem('edu_user', JSON.stringify(app))
+        } else {
+          setUser(null)
+        }
+      }
+      setReady(true)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
+    const emailErr = validateEmail(email)
+    if (emailErr) return { ok: false, msg: emailErr }
+    const pwErr = validatePassword(password.trim())
+    if (pwErr) return { ok: false, msg: pwErr }
+
     try {
-      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({ email, password })
-      if (authErr) return { ok: false, msg: "Email hoặc mật khẩu không đúng" }
-      if (!authData.user) return { ok: false, msg: "Lỗi đăng nhập từ Supabase" }
+      const { data: auth, error: authErr } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+      })
+      if (authErr || !auth.user) return { ok: false, msg: 'Email hoặc mật khẩu không đúng' }
 
-      const dbAcc = await getAccount(email.toLowerCase())
-      if (!dbAcc) return { ok: false, msg: "Không tìm thấy hồ sơ hệ thống" }
-      if (!dbAcc.active) return { ok: false, msg: "Tài khoản đã bị vô hiệu hóa" }
+      const db = await getAccount(email.trim().toLowerCase())
+      if (!db) return { ok: false, msg: 'Không tìm thấy hồ sơ tài khoản' }
+      if (!db.active) return { ok: false, msg: 'Tài khoản đã bị vô hiệu hóa' }
 
-      const appAcc = await dbAccountToApp(dbAcc)
-      setUser(appAcc)
-      localStorage.setItem("edu_user", JSON.stringify(appAcc))
-      return { ok: true, msg: "Đăng nhập thành công", role: appAcc.role }
-    } catch (error) {
-      return { ok: false, msg: "Lỗi server" }
+      const app = await dbToApp(db)
+      setUser(app)
+      localStorage.setItem('edu_user', JSON.stringify(app))
+      return { ok: true, msg: 'Đăng nhập thành công', role: app.role }
+    } catch {
+      return { ok: false, msg: 'Lỗi server, vui lòng thử lại' }
     }
   }, [])
 
   const register = useCallback(async (email: string, name: string, password: string) => {
+    const emailErr = validateEmail(email)
+    if (emailErr) return { ok: false, msg: emailErr }
+    const pwErr = validatePassword(password.trim())
+    if (pwErr) return { ok: false, msg: pwErr }
+    if (!name.trim()) return { ok: false, msg: 'Vui lòng nhập họ và tên' }
+
     try {
-      const existing = await getAccount(email.toLowerCase())
-      if (existing) return { ok: false, msg: "Email đã được đăng ký" }
-      if (password.length < 6) return { ok: false, msg: "Mật khẩu tối thiểu 6 ký tự" }
+      const existing = await getAccount(email.trim().toLowerCase())
+      if (existing) return { ok: false, msg: 'Email này đã được đăng ký' }
 
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
-        password,
-        options: { data: { name, role: 'student' } }
+      const { data: auth, error: authErr } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+        options: { data: { name: name.trim(), role: 'student' } },
       })
-      if (authErr) return { ok: false, msg: authErr.message }
-      if (!authData.user) return { ok: false, msg: "Lỗi tạo tài khoản bảo mật" }
+      if (authErr || !auth.user) return { ok: false, msg: authErr?.message || 'Lỗi tạo tài khoản' }
 
-      const dbAcc = await createAccount(email.toLowerCase(), name, authData.user.id, "student")
-      if (!dbAcc) return { ok: false, msg: "Lỗi tạo hồ sơ" }
+      const db = await createAccount(email.trim().toLowerCase(), name.trim(), auth.user.id, 'student')
+      if (!db) return { ok: false, msg: 'Lỗi tạo hồ sơ. Vui lòng thử lại.' }
 
-      const appAcc = await dbAccountToApp(dbAcc)
-      setUser(appAcc)
-      localStorage.setItem("edu_user", JSON.stringify(appAcc))
-      return { ok: true, msg: "Đăng ký thành công" }
-    } catch (error) {
-      return { ok: false, msg: "Lỗi server" }
+      const app = await dbToApp(db)
+      setUser(app)
+      localStorage.setItem('edu_user', JSON.stringify(app))
+      return { ok: true, msg: 'Đăng ký thành công' }
+    } catch {
+      return { ok: false, msg: 'Lỗi server, vui lòng thử lại' }
     }
   }, [])
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
-    localStorage.removeItem("edu_user")
+    localStorage.removeItem('edu_user')
   }, [])
 
   const toggleTheme = useCallback(() => {
-    const next = theme === "dark" ? "light" : "dark"
+    const next = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
-    document.documentElement.setAttribute("data-theme", next)
-    localStorage.setItem("edu_theme", next)
+    document.documentElement.setAttribute('data-theme', next)
+    localStorage.setItem('edu_theme', next)
   }, [theme])
 
   const updateProfile = useCallback((data: Partial<Account>) => {
     if (!user) return
     const updated = { ...user, ...data }
     setUser(updated)
-    localStorage.setItem("edu_user", JSON.stringify(updated))
+    localStorage.setItem('edu_user', JSON.stringify(updated))
   }, [user])
 
-  const addAccount = useCallback(async (acc: Account) => {
-    alert("Vui lòng đăng ký tài khoản qua trang Đăng ký. Không thể tự tạo mật khẩu Supabase từ Admin client.")
-  }, [fetchAccounts])
-
-  const updateAccount = useCallback(async (email: string, data: Partial<Account>) => {
-    try {
-      // Update account fields
-      const { error } = await supabase
-        .from("accounts")
-        .update({
-          name: data.name,
-          active: data.active,
-          avatar: data.avatar,
-        })
-        .eq("email", email)
-      if (error) { console.error("updateAccount error:", error); return }
-
-      // Sync enrollments if provided
-      if (data.enrollments !== undefined) {
-        // Find the account id
-        const { data: accData } = await supabase.from("accounts").select("id").eq("email", email).single()
-        if (accData) {
-          // Delete existing enrollments
-          await supabase.from("enrollments").delete().eq("account_id", accData.id)
-          // Insert new enrollments
-          if (data.enrollments.length > 0) {
-            await supabase.from("enrollments").insert(
-              data.enrollments.map(courseId => ({ account_id: accData.id, course_id: courseId }))
-            )
-          }
-        }
-      }
-
-      await fetchAccounts()
-    } catch (e) {
-      console.error("updateAccount error:", e)
-    }
-  }, [fetchAccounts])
-
-  const deleteAccount = useCallback(async (email: string) => {
-    try {
-      const { error } = await supabase.from("accounts").delete().eq("email", email)
-      if (!error) {
-        await fetchAccounts()
-      }
-    } catch (e) {
-      console.error("deleteAccount error:", e)
-    }
-  }, [fetchAccounts])
-
-  if (!ready) return null
+  if (!ready) return (
+    <div className="loading-screen">
+      <div className="loading-ring" />
+      <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Đang tải...</p>
+    </div>
+  )
 
   return (
-    <Ctx.Provider value={{ user, accounts, theme, login, register, logout, toggleTheme, updateProfile, addAccount, updateAccount, deleteAccount }}>
+    <Ctx.Provider value={{ user, theme, login, register, logout, toggleTheme, updateProfile, refreshUser }}>
       {children}
     </Ctx.Provider>
   )
